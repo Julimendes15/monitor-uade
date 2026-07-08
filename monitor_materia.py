@@ -414,17 +414,35 @@ def leer_disponibilidad(page, materia) -> bool:
     return hay_cupo
 
 
-def encontrar_estado_materia(page, materia) -> bool:
-    """Orquesta la búsqueda de UNA materia dentro del portal ya logueado."""
+def encontrar_estado_materia(page, materia, reintentos=2) -> bool:
+    """
+    Orquesta la búsqueda de UNA materia dentro del portal ya logueado.
+    Reintenta ante errores transitorios de navegación (cortes de red, etc.),
+    para que un fallo puntual no arruine la corrida ni contagie a la siguiente.
+    """
+    codigo = materia["codigo"]
     log.info("Buscando materia %s (%s / %s)...",
-             materia["codigo"], materia["turno"], ", ".join(materia["dias"]))
-    # Volver al home para leer el link del ofrecimiento (cambia por sesión)
-    page.goto(INSCRIPCION_URL, timeout=TIMEOUT)
-    page.wait_for_load_state("networkidle", timeout=TIMEOUT)
-    ir_a_buscador(page)
-    if not configurar_busqueda(page, materia):
-        return False
-    return leer_disponibilidad(page, materia)
+             codigo, materia["turno"], ", ".join(materia["dias"]))
+
+    ultimo_error = None
+    for intento in range(1, reintentos + 1):
+        try:
+            # Volver al home para leer el link del ofrecimiento (cambia por sesión)
+            page.goto(INSCRIPCION_URL, timeout=TIMEOUT, wait_until="domcontentloaded")
+            page.wait_for_load_state("networkidle", timeout=TIMEOUT)
+            ir_a_buscador(page)
+            if not configurar_busqueda(page, materia):
+                return False
+            return leer_disponibilidad(page, materia)
+        except Exception as e:  # noqa: BLE001
+            ultimo_error = e
+            if intento < reintentos:
+                log.warning("[%s] Error de navegación (intento %d/%d): %s — reintento",
+                            codigo, intento, reintentos, str(e).splitlines()[0])
+                page.wait_for_timeout(3000)
+
+    # Se agotaron los reintentos
+    raise ultimo_error
 
 
 # ─────────────────────────────────────────────────────────────────────────────
