@@ -245,10 +245,14 @@ def ir_a_buscador(page) -> None:
 
     ids = [links.nth(i).get_attribute("data-linkid") for i in range(n)]
 
+    cuatris = [_cuatrimestre_de_link(lid) for lid in ids]
+    log.info("Ofrecimientos disponibles (cuatrimestres): %s", cuatris)
+
     destino = None
-    for lid in ids:
-        if lid and _cuatrimestre_de_link(lid) == CUATRIMESTRE_OBJETIVO:
+    for lid, cu in zip(ids, cuatris):
+        if lid and cu == CUATRIMESTRE_OBJETIVO:
             destino = lid
+            log.info("Usando ofrecimiento cuatrimestre %s", cu)
             break
     if destino is None:
         idx = min(OFRECIMIENTO_INDEX_FALLBACK, n - 1)
@@ -269,15 +273,23 @@ def configurar_busqueda(page) -> bool:
     # Abrir el selector de materias
     page.click("#ContentPlaceHolder1_btnSeleccionarMaterias")
     page.wait_for_load_state("networkidle", timeout=TIMEOUT)
-    page.wait_for_timeout(800)
+
+    # Esperar explícitamente a que la grilla de materias termine de cargar
+    # (se abre por postback; en entornos lentos tarda en poblarse).
+    celda_codigo = f"xpath=//td[normalize-space(.)='{CODIGO_MATERIA}']"
+    try:
+        page.wait_for_selector(celda_codigo, timeout=15_000)
+    except PlaywrightTimeoutError:
+        # Diagnóstico: ¿se abrió el modal con materias o está vacío?
+        n_chk = page.locator("input[id*='chkSeleccionar']").count()
+        log.warning("Materia %s no aparece en el listado de este ofrecimiento "
+                    "(%d materias visibles en el selector)", CODIGO_MATERIA, n_chk)
+        return False
 
     # Tildar el checkbox de la fila cuyo <td> es exactamente el código
     chk = page.locator(
         f"xpath=//td[normalize-space(.)='{CODIGO_MATERIA}']/ancestor::tr[1]//input[@type='checkbox']"
     ).first
-    if chk.count() == 0:
-        log.warning("Materia %s no aparece en el listado de este ofrecimiento", CODIGO_MATERIA)
-        return False
     chk.check()
     page.wait_for_timeout(500)
 
