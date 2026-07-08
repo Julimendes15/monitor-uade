@@ -36,6 +36,7 @@ jobs:
           UADE_USUARIO: ${{ secrets.UADE_USUARIO }}
           UADE_PASSWORD: ${{ secrets.UADE_PASSWORD }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          HEARTBEAT: ${{ vars.HEARTBEAT }}
         run: python monitor_materia.py --once
 
       - name: Subir log como artefacto

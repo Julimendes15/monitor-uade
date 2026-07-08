@@ -81,6 +81,10 @@ INTERVALO_SEGUNDOS = 5 * 60   # 5 minutos
 HEADLESS = True               # cambiar a False para ver el browser (debug)
 TIMEOUT  = 30_000             # ms por página
 
+# Heartbeat: si está activo, notifica también cuando NO hay cupo (para verificar
+# que el monitor sigue corriendo). Se controla con la env var HEARTBEAT=1.
+HEARTBEAT = os.environ.get("HEARTBEAT", "0") == "1"
+
 # Mapa día -> id del checkbox en el buscador
 _DIAS_CHECKBOX = {
     "Lunes":     "#ContentPlaceHolder1_chkLunes",
@@ -438,7 +442,7 @@ def notificar(titulo, mensaje, urgencia="high", link=INSCRIPCION_URL) -> None:
             },
             timeout=10,
         )
-        log.info("Notificación enviada (link: %s). Deteniendo monitor.", link)
+        log.info("Notificación enviada (link: %s)", link)
     except Exception as e:  # noqa: BLE001
         log.error("Error enviando notificación ntfy: %s", e)
 
@@ -517,6 +521,14 @@ def ejecutar_una_vez() -> None:
         except Exception as e:  # noqa: BLE001
             log.error("No pude escribir el marcador: %s", e)
         log.info("Marcador creado — no se harán más chequeos hasta borrar %s", _FLAG_PATH)
+    elif HEARTBEAT:
+        # Aviso de "sigo vivo" (baja prioridad) para verificar que el loop corre
+        notificar(
+            titulo=f"Monitor activo — {CODIGO_MATERIA} sin cupo",
+            mensaje=f"Chequeo OK a las {time.strftime('%H:%M')}. "
+                    f"{CODIGO_MATERIA} ({TURNO}) sigue sin vacantes. El monitor está corriendo.",
+            urgencia="low",
+        )
 
 
 if __name__ == "__main__":
