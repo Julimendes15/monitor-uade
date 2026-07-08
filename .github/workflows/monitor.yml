@@ -31,7 +31,7 @@ jobs:
           key: playwright-chromium-v1
 
       - name: Instalar dependencias Python
-        run: pip install playwright requests
+        run: pip install -r requirements.txt
 
       - name: Instalar Chromium
         # Con cache-hit, 'install' detecta el navegador y no lo re-descarga.
