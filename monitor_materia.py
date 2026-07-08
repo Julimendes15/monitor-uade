@@ -55,11 +55,17 @@ _cargar_env()
 # UADE
 UADE_LOGIN_URL = "https://inscripciones.uade.edu.ar/Account/Login"
 INSCRIPCION_URL = "https://inscripciones.uade.edu.ar/"   # link para la notificación
-CODIGO_MATERIA = "3.4.131"
 
-# Filtro de búsqueda de la clase objetivo
-TURNO          = "NOCHE"       # texto exacto de la opción de Turno
-DIAS           = ["Martes"]    # días a tildar (Lunes..Sábado)
+# Materias a monitorear. Cada una con su turno y día(s). Se chequean todas en
+# cada corrida (una sola sesión de login). Para agregar otra, sumá un dict.
+# "clase" (opcional) fija la comisión exacta a vigilar: el filtro turno+día del
+# portal no es estricto y puede traer otras comisiones. Si se especifica, solo
+# esa clase cuenta para "hay cupo". Si se omite, cuenta cualquier clase del
+# resultado.
+MATERIAS = [
+    {"codigo": "3.4.131", "turno": "NOCHE", "dias": ["Martes"], "clase": "15850"},
+    {"codigo": "3.4.210", "turno": "NOCHE", "dias": ["Lunes"],  "clase": "1941"},
+]
 
 # Ofrecimiento a usar (hay varios: MRI 1er cuatri, Asignaturas 2do cuatri, etc.)
 # Se elige el link cuyo parámetro tenga este cuatrimestre. Si cambia el período
@@ -105,7 +111,11 @@ _DIAS_CHECKBOX = {
 # Rutas absolutas (para que funcione lanzado por launchd/cron, con CWD "/")
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _LOG_PATH  = os.path.join(_DIR, "monitor.log")
-_FLAG_PATH = os.path.join(_DIR, "cupo_encontrado.flag")
+
+
+def _flag_path(codigo: str) -> str:
+    """Ruta del marcador 'cupo encontrado' para una materia."""
+    return os.path.join(_DIR, f"cupo_encontrado_{codigo}.flag")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -269,30 +279,34 @@ def ir_a_buscador(page) -> None:
     page.wait_for_selector("#ContentPlaceHolder1_btnSeleccionarMaterias", timeout=TIMEOUT)
 
 
-def configurar_busqueda(page) -> bool:
+def configurar_busqueda(page, materia) -> bool:
     """
     Selecciona la materia, el turno y los días en el buscador, y ejecuta
     la búsqueda. Devuelve False si la materia no está en el listado.
     """
+    codigo = materia["codigo"]
+    turno  = materia["turno"]
+    dias   = materia["dias"]
+
     # Abrir el selector de materias
     page.click("#ContentPlaceHolder1_btnSeleccionarMaterias")
     page.wait_for_load_state("networkidle", timeout=TIMEOUT)
 
     # Esperar explícitamente a que la grilla de materias termine de cargar
     # (se abre por postback; en entornos lentos tarda en poblarse).
-    celda_codigo = f"xpath=//td[normalize-space(.)='{CODIGO_MATERIA}']"
+    celda_codigo = f"xpath=//td[normalize-space(.)='{codigo}']"
     try:
         page.wait_for_selector(celda_codigo, timeout=15_000)
     except PlaywrightTimeoutError:
         # Diagnóstico: ¿se abrió el modal con materias o está vacío?
         n_chk = page.locator("input[id*='chkSeleccionar']").count()
         log.warning("Materia %s no aparece en el listado de este ofrecimiento "
-                    "(%d materias visibles en el selector)", CODIGO_MATERIA, n_chk)
+                    "(%d materias visibles en el selector)", codigo, n_chk)
         return False
 
     # Tildar el checkbox de la fila cuyo <td> es exactamente el código
     chk = page.locator(
-        f"xpath=//td[normalize-space(.)='{CODIGO_MATERIA}']/ancestor::tr[1]//input[@type='checkbox']"
+        f"xpath=//td[normalize-space(.)='{codigo}']/ancestor::tr[1]//input[@type='checkbox']"
     ).first
     chk.check()
     page.wait_for_timeout(500)
@@ -307,13 +321,13 @@ def configurar_busqueda(page) -> bool:
 
     # Turno (por texto de la opción, más durable que el value numérico)
     try:
-        page.select_option("#ContentPlaceHolder1_cboTurno", label=TURNO)
+        page.select_option("#ContentPlaceHolder1_cboTurno", label=turno)
         page.wait_for_timeout(400)
     except Exception as e:
-        log.warning("No pude seleccionar turno '%s': %s", TURNO, e)
+        log.warning("No pude seleccionar turno '%s': %s", turno, e)
 
     # Días
-    for dia in DIAS:
+    for dia in dias:
         sel = _DIAS_CHECKBOX.get(dia)
         if sel and page.locator(sel).count():
             page.check(sel)
@@ -326,11 +340,15 @@ def configurar_busqueda(page) -> bool:
     return True
 
 
-def leer_disponibilidad(page) -> bool:
+def leer_disponibilidad(page, materia) -> bool:
     """
     Parsea la grilla de resultados y determina si hay vacantes (> 0) para
     la materia objetivo. Loggea cada clase encontrada con su estado.
     """
+    codigo = materia["codigo"]
+    turno  = materia["turno"]
+    dias   = materia["dias"]
+
     grids = page.locator("[id*='grdResultados']")
     total = grids.count()
 
@@ -362,46 +380,67 @@ def leer_disponibilidad(page) -> bool:
                 continue
             vac = int(m.group())
             nro = (celdas.nth(idx_clase).inner_text() or "").strip()
-            turno = (celdas.nth(idx_turno).inner_text() or "").strip() if idx_turno is not None else ""
-            clases.append((nro, vac, turno))
+            turno_c = (celdas.nth(idx_turno).inner_text() or "").strip() if idx_turno is not None else ""
+            clases.append((nro, vac, turno_c))
 
     if not clases:
         log.warning("Sin resultados para %s (%s / %s) — no ofertada o filtro sin coincidencias",
-                    CODIGO_MATERIA, TURNO, ", ".join(DIAS))
+                    codigo, turno, ", ".join(dias))
         return False
 
+    clase_objetivo = materia.get("clase")  # comisión exacta a vigilar (o None)
+
     hay_cupo = False
-    for nro, vac, turno in clases:
+    objetivo_visto = False
+    for nro, vac, turno_c in clases:
         estado = f"{vac} vacantes" if vac > 0 else "Sin cupo (0 vacantes)"
-        log.info('Estado encontrado: clase %s (%s) -> "%s"', nro, turno or TURNO, estado)
-        if vac > 0:
-            hay_cupo = True
+        # ¿esta fila es la comisión que nos interesa?
+        es_objetivo = (clase_objetivo is None) or (nro == clase_objetivo)
+        marca = " ◄ objetivo" if (clase_objetivo and nro == clase_objetivo) else ""
+        log.info('[%s] Estado encontrado: clase %s (%s) -> "%s"%s',
+                 codigo, nro, turno_c or turno, estado, marca)
+        if es_objetivo:
+            objetivo_visto = objetivo_visto or (clase_objetivo is not None)
+            if vac > 0:
+                hay_cupo = True
+
+    if clase_objetivo and not objetivo_visto:
+        log.warning("[%s] La clase objetivo %s no apareció en los resultados", codigo, clase_objetivo)
 
     if hay_cupo:
-        log.info("✅ CUPO DISPONIBLE en materia %s", CODIGO_MATERIA)
+        log.info("✅ CUPO DISPONIBLE en materia %s (clase %s)", codigo, clase_objetivo or "cualquiera")
     else:
-        log.info("❌ Sin cupo — próximo chequeo en %d minutos", INTERVALO_SEGUNDOS // 60)
+        log.info("[%s] ❌ Sin cupo", codigo)
     return hay_cupo
 
 
-def encontrar_estado_materia(page) -> bool:
-    """Orquesta la parte de búsqueda dentro del portal ya logueado."""
-    log.info("Buscando materia %s...", CODIGO_MATERIA)
+def encontrar_estado_materia(page, materia) -> bool:
+    """Orquesta la búsqueda de UNA materia dentro del portal ya logueado."""
+    log.info("Buscando materia %s (%s / %s)...",
+             materia["codigo"], materia["turno"], ", ".join(materia["dias"]))
+    # Volver al home para leer el link del ofrecimiento (cambia por sesión)
+    page.goto(INSCRIPCION_URL, timeout=TIMEOUT)
+    page.wait_for_load_state("networkidle", timeout=TIMEOUT)
     ir_a_buscador(page)
-    if not configurar_busqueda(page):
+    if not configurar_busqueda(page, materia):
         return False
-    return leer_disponibilidad(page)
+    return leer_disponibilidad(page, materia)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ORQUESTACIÓN DEL CHEQUEO
 # ─────────────────────────────────────────────────────────────────────────────
 
-def chequear_disponibilidad() -> bool:
+def chequear_disponibilidad(materias=None) -> dict:
     """
-    Abre el browser (con credenciales HTTP para inscripcionespia), hace
-    login, busca la materia y cierra el browser siempre.
+    Abre el browser (con credenciales HTTP para inscripcionespia), hace login
+    una sola vez y chequea cada materia. Cierra el browser siempre.
+    Devuelve {codigo: True/False} con la disponibilidad de cada una.
     """
+    if materias is None:
+        materias = MATERIAS
+
+    resultados = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=HEADLESS)
         try:
@@ -412,9 +451,15 @@ def chequear_disponibilidad() -> bool:
             page = context.new_page()
             page.set_default_timeout(TIMEOUT)
             login_microsoft(page)
-            return encontrar_estado_materia(page)
+            for materia in materias:
+                try:
+                    resultados[materia["codigo"]] = encontrar_estado_materia(page, materia)
+                except Exception as e:  # noqa: BLE001
+                    log.error("[%s] Error en la búsqueda: %s", materia["codigo"], e)
+                    resultados[materia["codigo"]] = False
         finally:
             browser.close()
+    return resultados
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -451,19 +496,37 @@ def notificar(titulo, mensaje, urgencia="high", link=INSCRIPCION_URL) -> None:
 # LOOP PRINCIPAL
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _notificar_cupo(materia) -> None:
+    """Notifica cupo disponible para una materia puntual."""
+    codigo = materia["codigo"]
+    notificar(
+        titulo=f"Cupo disponible — {codigo}",
+        mensaje=f"¡Hay cupo en la materia {codigo} "
+                f"({materia['turno']}, {', '.join(materia['dias'])})! "
+                f"Tocá para inscribirte.",
+        urgencia="high",
+    )
+
+
+def _resumen_materias() -> str:
+    return " | ".join(f"{m['codigo']} ({m['turno']}, {', '.join(m['dias'])})"
+                      for m in MATERIAS)
+
+
 def loop_monitoreo() -> None:
-    """Loop principal de monitoreo. Nunca se rompe por un error de chequeo."""
+    """Loop continuo de monitoreo. Nunca se rompe por un error de chequeo."""
     log.info("══════════════════════════════════════")
-    log.info("Monitor UADE — materia %s", CODIGO_MATERIA)
-    log.info("Filtro: turno %s | días %s", TURNO, ", ".join(DIAS))
+    log.info("Monitor UADE — %d materia(s)", len(MATERIAS))
+    log.info("Objetivos: %s", _resumen_materias())
     log.info("Intervalo: %d minutos | ntfy: %s", INTERVALO_SEGUNDOS // 60, NTFY_TOPIC)
     log.info("══════════════════════════════════════")
 
+    pendientes = list(MATERIAS)
     intento = 1
-    while True:
+    while pendientes:
         log.info("Chequeo #%d", intento)
         try:
-            disponible = chequear_disponibilidad()
+            resultados = chequear_disponibilidad(pendientes)
         except Exception as e:  # noqa: BLE001
             mensaje = str(e)
             if "MFA" in mensaje or "verificación" in mensaje.lower():
@@ -475,12 +538,14 @@ def loop_monitoreo() -> None:
             time.sleep(INTERVALO_SEGUNDOS)
             continue
 
-        if disponible:
-            notificar(
-                titulo=f"Cupo disponible — {CODIGO_MATERIA}",
-                mensaje=f"¡Hay cupo en la materia {CODIGO_MATERIA} ({TURNO})! Inscribite ahora.",
-                urgencia="high",
-            )
+        # Notificar y sacar de pendientes las que ya tienen cupo
+        for materia in list(pendientes):
+            if resultados.get(materia["codigo"]):
+                _notificar_cupo(materia)
+                pendientes.remove(materia)
+
+        if not pendientes:
+            log.info("Todas las materias notificadas. Deteniendo monitor.")
             break
 
         intento += 1
@@ -489,17 +554,20 @@ def loop_monitoreo() -> None:
 
 def ejecutar_una_vez() -> None:
     """
-    Hace UN solo chequeo y termina (pensado para launchd/cron cada 5 min).
-    Si ya se encontró cupo antes (existe el marcador), no hace nada.
+    Hace UN solo chequeo de todas las materias y termina (para launchd/cron).
+    Cada materia con cupo ya avisado deja un marcador y se omite en adelante.
     """
-    if os.path.exists(_FLAG_PATH):
-        log.info("Cupo ya encontrado previamente — omitiendo chequeo. "
-                 "Borrá %s para reactivar.", _FLAG_PATH)
+    # Filtrar materias que ya tienen su marcador (cupo ya avisado)
+    pendientes = [m for m in MATERIAS if not os.path.exists(_flag_path(m["codigo"]))]
+    if not pendientes:
+        log.info("Todas las materias ya fueron avisadas — nada que chequear. "
+                 "Borrá los archivos cupo_encontrado_*.flag para reactivar.")
         return
 
-    log.info("Chequeo puntual — materia %s (%s)", CODIGO_MATERIA, TURNO)
+    log.info("Chequeo puntual — %s", " | ".join(
+        f"{m['codigo']} ({m['turno']}, {', '.join(m['dias'])})" for m in pendientes))
     try:
-        disponible = chequear_disponibilidad()
+        resultados = chequear_disponibilidad(pendientes)
     except Exception as e:  # noqa: BLE001
         mensaje = str(e)
         if "MFA" in mensaje or "verificación" in mensaje.lower():
@@ -508,25 +576,27 @@ def ejecutar_una_vez() -> None:
             log.error("Error durante el chequeo: %s", mensaje)
         return
 
-    if disponible:
-        notificar(
-            titulo=f"Cupo disponible — {CODIGO_MATERIA}",
-            mensaje=f"¡Hay cupo en la materia {CODIGO_MATERIA} ({TURNO})! Tocá para inscribirte.",
-            urgencia="high",
-        )
-        # Marcador para no volver a notificar en cada corrida programada
-        try:
-            with open(_FLAG_PATH, "w", encoding="utf-8") as f:
-                f.write(f"Cupo encontrado el {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-        except Exception as e:  # noqa: BLE001
-            log.error("No pude escribir el marcador: %s", e)
-        log.info("Marcador creado — no se harán más chequeos hasta borrar %s", _FLAG_PATH)
-    elif HEARTBEAT:
+    alguna_con_cupo = False
+    for materia in pendientes:
+        codigo = materia["codigo"]
+        if resultados.get(codigo):
+            alguna_con_cupo = True
+            _notificar_cupo(materia)
+            # Marcador para no volver a avisar esta materia en cada corrida
+            try:
+                with open(_flag_path(codigo), "w", encoding="utf-8") as f:
+                    f.write(f"Cupo encontrado el {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            except Exception as e:  # noqa: BLE001
+                log.error("No pude escribir el marcador de %s: %s", codigo, e)
+            log.info("[%s] Marcador creado — no se volverá a chequear hasta borrarlo", codigo)
+
+    if not alguna_con_cupo and HEARTBEAT:
         # Aviso de "sigo vivo" (baja prioridad) para verificar que el loop corre
+        codigos = ", ".join(m["codigo"] for m in pendientes)
         notificar(
-            titulo=f"Monitor activo — {CODIGO_MATERIA} sin cupo",
+            titulo="Monitor activo — sin cupo",
             mensaje=f"Chequeo OK a las {time.strftime('%H:%M')}. "
-                    f"{CODIGO_MATERIA} ({TURNO}) sigue sin vacantes. El monitor está corriendo.",
+                    f"Sin vacantes en: {codigos}. El monitor está corriendo.",
             urgencia="low",
         )
 
@@ -558,6 +628,6 @@ if __name__ == "__main__":
 #   Usa un LaunchAgent que corre `--once` cada 5 minutos.
 #   Cargar:    launchctl load  ~/Library/LaunchAgents/com.julian.monitoruade.plist
 #   Descargar: launchctl unload ~/Library/LaunchAgents/com.julian.monitoruade.plist
-#   Al encontrar cupo se crea 'cupo_encontrado.flag' y deja de chequear.
-#   Para reactivar: borrar ese archivo.
+#   Al encontrar cupo de una materia se crea 'cupo_encontrado_<codigo>.flag'
+#   y esa materia deja de chequearse. Para reactivar: borrar ese archivo.
 # ─────────────────────────────────────────────────────────────────────────────
