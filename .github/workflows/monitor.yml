@@ -1,0 +1,48 @@
+name: Monitor materia UADE
+
+on:
+  schedule:
+    # Cada 5 minutos (GitHub puede atrasar los schedules bajo carga)
+    - cron: "*/5 * * * *"
+  workflow_dispatch:   # permite ejecutarlo manualmente desde la pestaña Actions
+
+# Evita que se acumulen corridas si una tarda más de lo esperado
+concurrency:
+  group: monitor-uade
+  cancel-in-progress: false
+
+jobs:
+  chequear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright requests
+          python -m playwright install --with-deps chromium
+
+      - name: Ejecutar chequeo
+        env:
+          UADE_EMAIL: ${{ secrets.UADE_EMAIL }}
+          UADE_USUARIO: ${{ secrets.UADE_USUARIO }}
+          UADE_PASSWORD: ${{ secrets.UADE_PASSWORD }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python monitor_materia.py --once
+
+      - name: Subir log como artefacto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-log
+          path: monitor.log
+          if-no-files-found: ignore
+          retention-days: 3

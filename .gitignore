@@ -1,0 +1,8 @@
+# Nunca versionar credenciales ni logs
+.env
+monitor.log
+launchd.out.log
+launchd.err.log
+cupo_encontrado.flag
+__pycache__/
+*.pyc
