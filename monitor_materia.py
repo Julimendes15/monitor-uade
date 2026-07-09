@@ -63,7 +63,6 @@ INSCRIPCION_URL = "https://inscripciones.uade.edu.ar/"   # link para la notifica
 # esa clase cuenta para "hay cupo". Si se omite, cuenta cualquier clase del
 # resultado.
 MATERIAS = [
-    {"codigo": "3.4.131", "turno": "NOCHE", "dias": ["Martes"], "clase": "15850"},
     {"codigo": "3.4.210", "turno": "NOCHE", "dias": ["Lunes"],  "clase": "1941"},
 ]
 
