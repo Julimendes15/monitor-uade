@@ -3,6 +3,7 @@
 monitor.log
 launchd.out.log
 launchd.err.log
-cupo_encontrado.flag
+cupo_encontrado*.flag
+verificacion_*.png
 __pycache__/
 *.pyc
