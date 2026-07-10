@@ -17,6 +17,7 @@ Flujo real del portal (relevado sobre inscripciones.uade.edu.ar):
 """
 
 import base64
+import json
 import logging
 import os
 import re
@@ -49,6 +50,51 @@ _cargar_env()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# CARGA DE config.json  (qué materias monitorear — editable sin tocar código)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DEFAULT_CFG = {
+    "cuatrimestre": "597",
+    "materias": [
+        {"codigo": "3.4.210", "turno": "NOCHE", "dias": ["Lunes"], "clase": "1941"},
+    ],
+}
+
+
+def _cargar_config(ruta="config.json") -> dict:
+    """Lee config.json (materias + cuatrimestre). Usa defaults si no existe."""
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), ruta)
+    cfg = {"cuatrimestre": _DEFAULT_CFG["cuatrimestre"],
+           "materias": list(_DEFAULT_CFG["materias"])}
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            if data.get("cuatrimestre"):
+                cfg["cuatrimestre"] = str(data["cuatrimestre"]).strip()
+            norm = []
+            for m in (data.get("materias") or []):
+                if not m.get("codigo"):
+                    continue
+                norm.append({
+                    "codigo": str(m["codigo"]).strip(),
+                    "turno":  str(m.get("turno", "")).strip(),
+                    "dias":   [str(d).strip() for d in (m.get("dias") or [])],
+                    "clase":  str(m["clase"]).strip() if m.get("clase") else None,
+                })
+            if norm:
+                cfg["materias"] = norm
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"[config] No pude leer config.json ({e}); uso valores por defecto.")
+    return cfg
+
+
+_CFG = _cargar_config()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -56,20 +102,16 @@ _cargar_env()
 UADE_LOGIN_URL = "https://inscripciones.uade.edu.ar/Account/Login"
 INSCRIPCION_URL = "https://inscripciones.uade.edu.ar/"   # link para la notificación
 
-# Materias a monitorear. Cada una con su turno y día(s). Se chequean todas en
-# cada corrida (una sola sesión de login). Para agregar otra, sumá un dict.
-# "clase" (opcional) fija la comisión exacta a vigilar: el filtro turno+día del
-# portal no es estricto y puede traer otras comisiones. Si se especifica, solo
-# esa clase cuenta para "hay cupo". Si se omite, cuenta cualquier clase del
-# resultado.
-MATERIAS = [
-    {"codigo": "3.4.210", "turno": "NOCHE", "dias": ["Lunes"],  "clase": "1941"},
-]
+# Materias a monitorear — se cargan desde config.json (ver _cargar_config).
+# Cada una: {codigo, turno, dias:[...], clase (opcional)}. "clase" fija la
+# comisión exacta: el filtro turno+día del portal no es estricto y puede traer
+# otras comisiones; si se especifica, solo esa clase cuenta para "hay cupo".
+MATERIAS = _CFG["materias"]
 
 # Ofrecimiento a usar (hay varios: MRI 1er cuatri, Asignaturas 2do cuatri, etc.)
 # Se elige el link cuyo parámetro tenga este cuatrimestre. Si cambia el período
 # de inscripción, actualizá este valor (o dejá que use el índice de fallback).
-CUATRIMESTRE_OBJETIVO      = "597"   # 2do cuatrimestre 2026 = 597
+CUATRIMESTRE_OBJETIVO      = _CFG["cuatrimestre"]   # viene de config.json
 OFRECIMIENTO_INDEX_FALLBACK = 1      # si no matchea el cuatrimestre, usa este link
 
 # Credenciales (se leen desde .env — NO escribirlas acá)

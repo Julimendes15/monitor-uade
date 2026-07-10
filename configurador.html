@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configurador · Monitor de materias UADE</title>
+<style>
+  :root{
+    --bg:#0f172a; --card:#1e293b; --card2:#273449; --line:#334155;
+    --txt:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --accent2:#22c55e;
+    --warn:#fbbf24; --danger:#f87171; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);line-height:1.5;padding:24px}
+  .wrap{max-width:860px;margin:0 auto}
+  h1{font-size:1.6rem;margin:0 0 4px}
+  h2{font-size:1.1rem;margin:0 0 12px;color:var(--accent)}
+  .sub{color:var(--muted);margin:0 0 24px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+        padding:20px;margin-bottom:20px}
+  label{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
+  input,select{width:100%;padding:9px 11px;background:var(--card2);color:var(--txt);
+        border:1px solid var(--line);border-radius:8px;font-size:.95rem}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:140px}
+  .dias{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .dias label{display:inline-flex;align-items:center;gap:5px;background:var(--card2);
+        border:1px solid var(--line);border-radius:20px;padding:6px 12px;margin:0;
+        color:var(--txt);cursor:pointer;font-size:.85rem}
+  .dias input{width:auto}
+  .materia{background:var(--card2);border:1px solid var(--line);border-radius:10px;
+        padding:14px;margin-bottom:12px;position:relative}
+  .del{position:absolute;top:10px;right:10px;background:transparent;border:none;
+        color:var(--danger);cursor:pointer;font-size:1.1rem}
+  button.action{background:var(--accent);color:#082f49;border:none;border-radius:8px;
+        padding:11px 18px;font-weight:600;cursor:pointer;font-size:.95rem}
+  button.ghost{background:transparent;border:1px dashed var(--line);color:var(--accent);
+        border-radius:8px;padding:9px 14px;cursor:pointer;width:100%;margin-top:4px}
+  .out{background:#0b1220;border:1px solid var(--line);border-radius:8px;padding:12px;
+        font-family:ui-monospace,Menlo,monospace;font-size:.82rem;white-space:pre;
+        overflow:auto;color:#cbd5e1}
+  .copy{background:var(--accent2);color:#052e16;border:none;border-radius:6px;
+        padding:5px 12px;font-size:.8rem;font-weight:600;cursor:pointer;margin-bottom:8px}
+  .step{display:flex;gap:12px;margin-bottom:14px}
+  .num{flex:none;width:26px;height:26px;border-radius:50%;background:var(--accent);
+        color:#082f49;display:grid;place-items:center;font-weight:700;font-size:.85rem}
+  .note{background:#422006;border:1px solid #713f12;color:#fde68a;border-radius:8px;
+        padding:10px 12px;font-size:.85rem;margin-top:10px}
+  .danger{background:#450a0a;border:1px solid #7f1d1d;color:#fecaca}
+  table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:6px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600}
+  code{background:var(--card2);padding:1px 6px;border-radius:5px;font-size:.85em}
+  a{color:var(--accent)}
+  .hidden{display:none}
+  .foot{color:var(--muted);font-size:.8rem;text-align:center;margin-top:30px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎓 Configurador · Monitor de materias UADE</h1>
+  <p class="sub">Completá tus datos y generá todo lo necesario para que el bot vigile tus materias
+     y te avise por push cuando haya cupo. <b>Nada se envía a ningún servidor: todo se genera acá en tu navegador.</b></p>
+
+  <!-- 1. GitHub -->
+  <div class="card">
+    <h2>1 · Tu repositorio en GitHub</h2>
+    <div class="row">
+      <div>
+        <label>Usuario de GitHub</label>
+        <input id="ghUser" placeholder="ej: juanperez">
+      </div>
+      <div>
+        <label>Nombre del repositorio (tu copia del template)</label>
+        <input id="ghRepo" placeholder="ej: monitor-uade" value="monitor-uade">
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Credenciales -->
+  <div class="card">
+    <h2>2 · Tus datos (irán a GitHub Secrets)</h2>
+    <div class="row">
+      <div>
+        <label>Email UADE</label>
+        <input id="email" placeholder="usuario@uade.edu.ar">
+      </div>
+      <div>
+        <label>Usuario UADE (el del login)</label>
+        <input id="usuario" placeholder="ej: jperez">
+      </div>
+    </div>
+    <label>Topic de ntfy (inventá uno único y difícil de adivinar)</label>
+    <input id="ntfy" placeholder="ej: uade-juan-9f3k2">
+    <div class="note danger">🔒 Tu <b>contraseña</b> de UADE NO se pide acá. La vas a cargar
+       vos directamente en GitHub Secrets (paso final), para que nunca quede escrita en ningún lado.</div>
+  </div>
+
+  <!-- 3. Materias -->
+  <div class="card">
+    <h2>3 · Materias a vigilar</h2>
+    <div id="materias"></div>
+    <button class="ghost" onclick="addMateria()">+ Agregar otra materia</button>
+    <label style="margin-top:16px">Cuatrimestre (avanzado — dejalo así salvo que sepas que cambió)</label>
+    <input id="cuatri" value="597" style="max-width:160px">
+    <div class="note">El “cuatrimestre” es un código interno del portal. <code>597</code> = 2do cuatri 2026.
+       Si en otro período no encuentra la materia, mirá el log del bot (lista los cuatrimestres disponibles) y actualizalo.</div>
+  </div>
+
+  <div style="text-align:center;margin-bottom:24px">
+    <button class="action" onclick="generar()">⚙️ Generar configuración</button>
+  </div>
+
+  <!-- Resultado -->
+  <div id="resultado" class="hidden">
+
+    <div class="card">
+      <h2>📄 config.json</h2>
+      <p class="sub" style="margin:0 0 10px">Pegá esto en el archivo <code>config.json</code> de tu repo (editable desde la web de GitHub).</p>
+      <button class="copy" onclick="copiar('outConfig')">Copiar</button>
+      <div class="out" id="outConfig"></div>
+    </div>
+
+    <div class="card">
+      <h2>🔐 Secrets a cargar en tu repo</h2>
+      <p class="sub" style="margin:0 0 6px">En tu repo: <b>Settings → Secrets and variables → Actions → New repository secret</b>. Cargá estos 4:</p>
+      <table>
+        <thead><tr><th>Nombre del secret</th><th>Valor</th></tr></thead>
+        <tbody id="outSecrets"></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>⏰ Configuración de cron-job.org (dispara cada 5 min)</h2>
+      <p class="sub" style="margin:0 0 10px">Creá una cuenta gratis en <a href="https://cron-job.org" target="_blank">cron-job.org</a> → “Create cronjob”. Necesitás un <b>token fine-grained</b> de GitHub con permiso <b>Actions: Read and write</b> sobre tu repo.</p>
+      <label>URL (POST, cada 5 minutos):</label>
+      <button class="copy" onclick="copiar('outUrl')">Copiar</button>
+      <div class="out" id="outUrl"></div>
+      <label style="margin-top:12px">Headers (pegá tu token donde dice TU_TOKEN):</label>
+      <button class="copy" onclick="copiar('outHeaders')">Copiar</button>
+      <div class="out" id="outHeaders"></div>
+      <label style="margin-top:12px">Body:</label>
+      <button class="copy" onclick="copiar('outBody')">Copiar</button>
+      <div class="out" id="outBody">{"ref":"main"}</div>
+    </div>
+
+    <div class="card">
+      <h2>✅ Pasos finales (en orden)</h2>
+      <div id="outPasos"></div>
+    </div>
+
+  </div>
+
+  <p class="foot">Generado localmente · Monitor de materias UADE · no requiere conexión</p>
+</div>
+
+<script>
+const DIAS = ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+const TURNOS = ["MAÑANA","TARDE","NOCHE","INTENSIVO","ONLINE"];
+
+function materiaHTML(){
+  const turnos = TURNOS.map(t=>`<option>${t}</option>`).join("");
+  const dias = DIAS.map(d=>`<label><input type="checkbox" value="${d}">${d}</label>`).join("");
+  return `<div class="materia">
+    <button class="del" onclick="this.parentNode.remove()" title="Quitar">✕</button>
+    <div class="row">
+      <div><label>Código de la materia</label><input class="m-cod" placeholder="ej: 3.4.210"></div>
+      <div><label>Turno</label><select class="m-turno">${turnos}</select></div>
+      <div><label>Clase / comisión (opcional)</label><input class="m-clase" placeholder="ej: 1941"></div>
+    </div>
+    <label>Días</label>
+    <div class="dias m-dias">${dias}</div>
+  </div>`;
+}
+function addMateria(){ document.getElementById("materias").insertAdjacentHTML("beforeend", materiaHTML()); }
+addMateria();
+
+function leerMaterias(){
+  const out=[];
+  document.querySelectorAll("#materias .materia").forEach(el=>{
+    const cod=el.querySelector(".m-cod").value.trim();
+    if(!cod) return;
+    const turno=el.querySelector(".m-turno").value;
+    const clase=el.querySelector(".m-clase").value.trim();
+    const dias=[...el.querySelectorAll(".m-dias input:checked")].map(i=>i.value);
+    const m={codigo:cod,turno:turno,dias:dias};
+    if(clase) m.clase=clase;
+    out.push(m);
+  });
+  return out;
+}
+
+function copiar(id){
+  const t=document.getElementById(id).innerText;
+  navigator.clipboard.writeText(t);
+  event.target.textContent="¡Copiado!";
+  setTimeout(()=>event.target.textContent="Copiar",1200);
+}
+
+function generar(){
+  const user=document.getElementById("ghUser").value.trim()||"TU_USUARIO";
+  const repo=document.getElementById("ghRepo").value.trim()||"monitor-uade";
+  const email=document.getElementById("email").value.trim()||"usuario@uade.edu.ar";
+  const usuario=document.getElementById("usuario").value.trim()||"TU_USUARIO_UADE";
+  const ntfy=document.getElementById("ntfy").value.trim()||"tu-topic-ntfy";
+  const cuatri=document.getElementById("cuatri").value.trim()||"597";
+  const materias=leerMaterias();
+
+  if(materias.length===0){ alert("Agregá al menos una materia con su código."); return; }
+
+  // config.json
+  const cfg={cuatrimestre:cuatri, materias:materias};
+  document.getElementById("outConfig").innerText=JSON.stringify(cfg,null,2);
+
+  // secrets
+  const secrets=[
+    ["UADE_EMAIL", email],
+    ["UADE_USUARIO", usuario],
+    ["UADE_PASSWORD", "⟵ tu contraseña de UADE (escribila directo acá en GitHub)"],
+    ["NTFY_TOPIC", ntfy],
+  ];
+  document.getElementById("outSecrets").innerHTML =
+    secrets.map(([k,v])=>`<tr><td><code>${k}</code></td><td>${v}</td></tr>`).join("");
+
+  // cron-job.org
+  document.getElementById("outUrl").innerText =
+    `https://api.github.com/repos/${user}/${repo}/actions/workflows/monitor.yml/dispatches`;
+  document.getElementById("outHeaders").innerText =
+    `Accept: application/vnd.github+json\nAuthorization: Bearer TU_TOKEN\nX-GitHub-Api-Version: 2022-11-28`;
+
+  // pasos
+  const pasos=[
+    `En el repo template, tocá <b>“Use this template” → Create a new repository</b> y llamalo <code>${repo}</code>.`,
+    `En tu repo nuevo, editá el archivo <code>config.json</code> y pegá el contenido de arriba (botón ✏️ en GitHub → Commit).`,
+    `Cargá los <b>4 Secrets</b> (Settings → Secrets and variables → Actions). La contraseña se escribe directo ahí.`,
+    `Suscribite al topic <code>${ntfy}</code> en la app <b>ntfy</b> (iOS/Android) para recibir los avisos.`,
+    `Creá un <b>token fine-grained</b> en GitHub (Settings → Developer settings) con acceso <b>solo a ${repo}</b> y permiso <b>Actions: Read and write</b>.`,
+    `Configurá <b>cron-job.org</b> con la URL, headers (con tu token) y body de arriba, cada 5 minutos.`,
+    `¡Listo! Verificá en la pestaña <b>Actions</b> de tu repo que empiecen a entrar corridas.`,
+  ];
+  document.getElementById("outPasos").innerHTML =
+    pasos.map((p,i)=>`<div class="step"><div class="num">${i+1}</div><div>${p}</div></div>`).join("");
+
+  document.getElementById("resultado").classList.remove("hidden");
+  document.getElementById("resultado").scrollIntoView({behavior:"smooth"});
+}
+</script>
+</body>
+</html>
